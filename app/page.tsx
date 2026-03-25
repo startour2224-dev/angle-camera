@@ -1,35 +1,55 @@
 "use client";
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 import { Camera, Upload, Download, RefreshCcw, Sun } from 'lucide-react';
 
 export default function Home() {
   const webcamRef = useRef<Webcam>(null);
+  // overlayImg には URL.createObjectURL() で作成した一時URLが入ります
   const [overlayImg, setOverlayImg] = useState<string | null>(null);
   const [opacity, setOpacity] = useState<number>(0.5);
   const [capturedImg, setCapturedImg] = useState<string | null>(null);
 
   /**
-   * 画像読み込み処理
-   * 構文エラーを修正：files?. とすることで、ファイルが存在する場合のみ取得します。
+   * 画像読み込み処理 (最新URL.createObjectURL方式)
+   * 構文エラーを物理的に排除し、Safariでの動作を安定させる実装です。
    */
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // 【修正箇所】?. の後に を追加し、セミコロンで閉じました
-    // どんなエラーも強制的に黙らせる「(e.target as any)」を使います
-const file = (e.target as any).files;
-    
-    if (!file) return;
+    const files = e.target.files;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result;
-      if (typeof result === 'string') {
-        setOverlayImg(result);
+    // filesがnullまたは空の場合は処理を中断
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    // 1枚目を取り出す。ここでの '!' は TypeScriptに「絶対にある」と伝えます。
+    const file = files!;
+    
+    // HEICなど特殊な形式による不具合を防ぐため、iPhoneでは一度「保存してある画像」を選んでください
+    if (file instanceof File) {
+      // FileReaderの代わりに、よりメモリ効率の良い URL.createObjectURL を使用
+      const objectUrl = URL.createObjectURL(file);
+      setOverlayImg(objectUrl);
+      setOpacity(0.5);
+    }
+  };
+
+  /**
+   * Safariでのメモリリークを防ぐため、
+   * 撮影後やアプリ終了時に一時URLを解放します。
+   */
+  useEffect(() => {
+    if (capturedImg && overlayImg) {
+      URL.revokeObjectURL(overlayImg);
+    }
+    // コンポーネントが破棄されるときにも解放
+    return () => {
+      if (overlayImg) {
+        URL.revokeObjectURL(overlayImg);
       }
     };
-    reader.readAsDataURL(file);
-  };
+  }, [capturedImg, overlayImg]);
 
   const capture = useCallback(() => {
     if (webcamRef.current) {
@@ -38,7 +58,7 @@ const file = (e.target as any).files;
         setCapturedImg(imageSrc);
       }
     }
-  }, [webcamRef]);
+  }, []);
 
   const downloadImage = () => {
     if (!capturedImg) return;
@@ -72,7 +92,7 @@ const file = (e.target as any).files;
                 src={overlayImg}
                 alt="Overlay"
                 className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                style={{ opacity: opacity }}
+                style={{ opacity: opacity, zIndex: 10 }}
               />
             )}
             
@@ -92,6 +112,7 @@ const file = (e.target as any).files;
               </label>
             </div>
 
+            {/* スライダーは常に表示 */}
             <div className="flex flex-col gap-3 bg-black/40 p-4 rounded-2xl border border-white/5">
               <div className="flex justify-between text-[10px] font-black text-neutral-500 uppercase tracking-widest">
                 <span className="flex items-center gap-1"><Sun size={12}/> Opacity</span>
@@ -118,9 +139,7 @@ const file = (e.target as any).files;
         </div>
       ) : (
         <div className="w-full max-w-md flex flex-col items-center gap-6">
-          <div className="w-full aspect-[3/4] rounded-[2rem] overflow-hidden shadow-2xl border border-blue-500/50">
-            <img src={capturedImg} alt="Captured" className="w-full h-full object-cover" />
-          </div>
+          <img src={capturedImg} alt="Captured" className="w-full aspect-[3/4] object-cover rounded-[2rem] shadow-2xl border border-blue-500/50" />
           <div className="flex gap-4 w-full">
             <button onClick={() => setCapturedImg(null)} className="flex-1 bg-neutral-900 border border-white/10 py-5 rounded-2xl flex items-center justify-center gap-2 font-bold transition-all active:scale-95">
               <RefreshCcw size={20} /> RETRY
